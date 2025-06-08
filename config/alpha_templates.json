@@ -1,0 +1,9 @@
+{
+  "basic_momentum": "ts_rank(close, 20)",
+  "reversal_short_term": "-1 * ts_corr(returns, median_volume, 5)",
+  "value_simple_pe": "1 / pe_ratio",
+  "growth_sales": "ts_growth_rate(sales_ps, 4)",
+  "volatility_adjusted_momentum": "ts_rank(close, 20) / ts_stddev(returns, 20)",
+  "template_with_placeholder": "delay({expression}, {days})",
+  "example_neutralized_alpha": "neutralize(ts_rank(close, 20), market_cap, industry_group)"
+}

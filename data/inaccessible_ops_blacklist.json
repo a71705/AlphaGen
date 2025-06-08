@@ -1,0 +1,17 @@
+[
+  {
+    "operator_name": "ts_fractal",
+    "reason": "Experimental and not yet validated for production use.",
+    "blacklisted_since": "2023-05-10"
+  },
+  {
+    "operator_name": "some_proprietary_op",
+    "reason": "Requires special license or data not available in this environment.",
+    "blacklisted_since": "2023-01-15"
+  },
+  {
+    "operator_name": "historical_analyst_ratings",
+    "reason": "Data feed discontinued.",
+    "blacklisted_since": "2024-01-01"
+  }
+]

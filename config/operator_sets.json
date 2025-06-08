@@ -1,0 +1,72 @@
+{
+  "arithmetic_ops": [
+    "add",
+    "subtract",
+    "multiply",
+    "divide",
+    "abs",
+    "log",
+    "sqrt",
+    "power",
+    "inverse"
+  ],
+  "logical_ops": [
+    "and",
+    "or",
+    "not",
+    "if_else"
+  ],
+  "ts_unary_ops": [
+    "ts_rank",
+    "ts_delay",
+    "ts_delta",
+    "ts_stddev",
+    "ts_mean",
+    "ts_max",
+    "ts_min",
+    "ts_product",
+    "ts_sum",
+    "ts_decay_linear"
+  ],
+  "ts_binary_ops": [
+    "ts_corr",
+    "ts_covariance"
+  ],
+  "cross_sectional_ops": [
+    "cs_rank",
+    "cs_scale",
+    "cs_normalize"
+  ],
+  "data_fields": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "returns",
+    "cap",
+    "pe_ratio",
+    "sales_ps",
+    "dividend_yield"
+  ],
+  "constants": [
+    "const_0_1",
+    "const_0_5",
+    "const_1",
+    "const_2",
+    "const_5",
+    "const_10",
+    "const_20",
+    "const_60",
+    "const_120",
+    "const_252"
+  ],
+  "all_available_ops": [
+    "add", "subtract", "multiply", "divide", "abs", "log", "sqrt", "power", "inverse",
+    "and", "or", "not", "if_else",
+    "ts_rank", "ts_delay", "ts_delta", "ts_stddev", "ts_mean", "ts_max", "ts_min",
+    "ts_product", "ts_sum", "ts_decay_linear", "ts_corr", "ts_covariance",
+    "cs_rank", "cs_scale", "cs_normalize"
+  ]
+}
