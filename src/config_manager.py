@@ -350,6 +350,74 @@ class ConfigManager:
         else:
             self.logger.error("不可访问操作符黑名单更新后，保存到文件失败。")
 
+    def set_runtime_param(self, category: str, param_name: str, value):
+        """
+        在运行时动态修改配置参数，仅更新内存中的配置，不保存到文件。
+        
+        该方法主要用于 AlphaEvolutionEngine 在 GA 进展过程中动态调整参数，
+        如交叉率、变异率、种群大小等。这些运行时参数的修改是临时的，
+        不会影响配置文件的内容。
+        
+        Args:
+            category (str): 配置类别，如 "ga"、"general" 等。
+            param_name (str): 参数名称，如 "crossover_rate"、"mutation_rate" 等。
+            value: 要设置的新参数值，可以是任意类型。
+        
+        Returns:
+            None
+            
+        Raises:
+            None: 该方法不会抛出异常，但会记录错误日志。
+            
+        Examples:
+            >>> config_manager = ConfigManager()
+            >>> config_manager.set_runtime_param("ga", "crossover_rate", 0.8)
+            >>> config_manager.set_runtime_param("ga", "population_size", 100)
+            >>> # 通过 get 方法验证修改
+            >>> rate = config_manager.get("ga.crossover_rate")
+            >>> print(rate)  # 输出: 0.8
+        """
+        # 参数验证
+        if not isinstance(category, str) or not category.strip():
+            self.logger.error("set_runtime_param: category 参数必须是非空字符串。")
+            return
+            
+        if not isinstance(param_name, str) or not param_name.strip():
+            self.logger.error("set_runtime_param: param_name 参数必须是非空字符串。")
+            return
+        
+        # 确保配置字典已初始化
+        if not isinstance(self.config, dict):
+            self.logger.error("set_runtime_param: 配置字典未正确初始化。")
+            return
+        
+        # 确保指定的配置类别存在，如果不存在则创建
+        if category not in self.config:
+            self.config[category] = {}
+            self.logger.info(f"set_runtime_param: 配置类别 '{category}' 不存在，已自动创建。")
+        
+        # 确保配置类别是字典类型
+        if not isinstance(self.config[category], dict):
+            self.logger.warning(f"set_runtime_param: 配置类别 '{category}' 不是字典类型，将被重置为空字典。")
+            self.config[category] = {}
+        
+        # 记录原始值（如果存在）
+        old_value = self.config[category].get(param_name, "<未设置>")
+        
+        # 设置新值
+        self.config[category][param_name] = value
+        
+        # 记录参数修改日志
+        self.logger.info(
+            f"运行时参数已修改: {category}.{param_name} = {value} (原值: {old_value})"
+        )
+        
+        # 调试级别的详细信息
+        self.logger.debug(
+            f"set_runtime_param 完成: category='{category}', param_name='{param_name}', "
+            f"new_value={repr(value)}, old_value={repr(old_value)}"
+        )
+
 if __name__ == '__main__':
     # 此部分用于基本测试，后续可以移除或移至测试文件
     logging.basicConfig(level=logging.INFO)

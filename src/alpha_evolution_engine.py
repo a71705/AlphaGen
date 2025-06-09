@@ -437,70 +437,91 @@ class AlphaEvolutionEngine:
             
             # 初始化或恢复种群
             if resume:
-                population = self._load_population_from_checkpoint()
-                if population is None:
-                    self.logger.warning("无法从检查点恢复种群，将开始新的优化过程")
-                    population = self._initialize_population(population_size)
-                    current_generation = 0
+                # 使用 ResultHandler 加载 GA 状态
+                ga_state = self.result_handler.load_ga_state()
+                if ga_state and 'population' in ga_state:
+                    self.current_population = ga_state['population']
+                    self.current_generation = ga_state.get('current_generation', 0)
+                    self.total_successful_alphas_found = ga_state.get('total_successful_alphas_found', 0)
+                    self.logger.info(f"成功从 ResultHandler 恢复种群，当前代数: {self.current_generation}")
                 else:
-                    current_generation = self._load_generation_from_checkpoint()
-                    self.logger.info(f"成功从检查点恢复种群，当前代数: {current_generation}")
+                    self.logger.warning("无法从 ResultHandler 恢复种群，将开始新的优化过程")
+                    self.current_population = self._initialize_population(population_size)
+                    self.current_generation = 0
+                    self.total_successful_alphas_found = 0
             else:
                 self.logger.info("开始新的优化过程，初始化种群...")
-                population = self._initialize_population(population_size)
-                current_generation = 0
-            
-            successful_alphas = []
+                self.current_population = self._initialize_population(population_size)
+                self.current_generation = 0
+                self.total_successful_alphas_found = 0
             
             # 主要的进化循环
-            for generation in range(current_generation, max_generations):
+            for generation in range(self.current_generation, max_generations):
                 self.logger.info(f"\n=== 第 {generation + 1}/{max_generations} 代进化开始 ===")
                 
-                # 评估当前种群的适应度
-                self.logger.info("评估种群适应度...")
-                self._evaluate_population_fitness(population)
+                # 使用替补式并发评估框架评估当前种群
+                self.logger.info("开始并发评估种群适应度...")
+                evaluation_results = self._evaluate_population_with_replenishing_concurrency()
                 
-                # 检查是否有成功的Alpha
-                generation_successful = self._extract_successful_alphas(population)
-                successful_alphas.extend(generation_successful)
+                # 更新种群中个体的适应度和状态
+                qualified_count = 0
+                for individual, is_qualified in evaluation_results:
+                    if is_qualified:
+                        qualified_count += 1
+                        self.total_successful_alphas_found += 1
                 
-                if generation_successful:
-                    self.logger.info(f"第 {generation + 1} 代发现 {len(generation_successful)} 个成功Alpha")
+                self.logger.info(f"第 {generation + 1} 代评估完成: {qualified_count}/{len(self.current_population)} 个合格Alpha")
                 
-                # 检查是否达到目标
-                if len(successful_alphas) >= target_successful_alphas:
-                    self.logger.info(f"已达到目标成功Alpha数量 ({len(successful_alphas)}/{target_successful_alphas})，提前结束优化")
+                # 自适应调整种群大小和遗传参数
+                self._adjust_population_size(qualified_count)
+                
+                # 检查终止条件
+                # 1. 检查是否达到目标成功Alpha数量
+                if self.total_successful_alphas_found >= target_successful_alphas:
+                    self.logger.info(f"已达到目标成功Alpha数量 ({self.total_successful_alphas_found}/{target_successful_alphas})，优化成功完成")
                     break
                 
-                # 保存当前进度
-                self._save_checkpoint(population, generation)
+                # 2. 检查是否达到最大代数（在循环条件中已经处理，这里添加日志）
+                if generation >= max_generations - 1:
+                    self.logger.info(f"已达到最大代数 ({max_generations})，优化结束")
+                    break
+                
+                # 更新当前代数
+                self.current_generation = generation + 1
+                
+                # 保存当前 GA 状态
+                ga_state = {
+                    'population': self.current_population,
+                    'current_generation': self.current_generation,
+                    'total_successful_alphas_found': self.total_successful_alphas_found
+                }
+                self.result_handler.save_ga_state(ga_state)
                 
                 # 如果不是最后一代，进行进化操作
                 if generation < max_generations - 1:
                     self.logger.info("执行进化操作...")
-                    population = self._evolve_population(population)
+                    # 将评估结果转换为 (Individual, bool) 格式，bool表示是否合格
+                    evaluated_population = [(ind, ind.fitness_score >= self.config_manager.get('ga.fitness_function.min_acceptable_fitness', 0.5)) for ind in self.current_population]
+                    self.current_population = self._generate_next_generation(evaluated_population)
                 
                 self.logger.info(f"第 {generation + 1} 代进化完成")
             
-            # 优化完成，保存结果
+            # 优化完成
             self.logger.info(f"\n=== 优化完成 ===")
-            self.logger.info(f"总共发现 {len(successful_alphas)} 个成功Alpha")
-            
-            if successful_alphas:
-                self._save_successful_alphas(successful_alphas)
-                self.logger.info("成功Alpha已保存")
-            
-            # 清理检查点文件
-            self._cleanup_checkpoints()
+            self.logger.info(f"总共发现 {self.total_successful_alphas_found} 个成功Alpha")
             
             self.logger.info("Alpha因子遗传算法优化完成")
             
         except KeyboardInterrupt:
             self.logger.warning("优化过程被用户中断")
-            # 保存当前进度
-            if 'population' in locals() and 'generation' in locals():
-                self._save_checkpoint(population, generation)
-                self.logger.info("当前进度已保存")
+            # 保存当前 GA 状态
+            ga_state = {
+                'population': self.current_population,
+                'current_generation': self.current_generation,
+                'total_successful_alphas_found': self.total_successful_alphas_found
+            }
+            self.result_handler.save_ga_state(ga_state)
+            self.logger.info("当前进度已保存")
             raise
         except Exception as e:
             self.logger.error(f"优化过程中发生错误: {e}", exc_info=True)
@@ -572,6 +593,238 @@ class AlphaEvolutionEngine:
         self.logger.debug(f"计算个体适应度 (占位符): {fitness:.4f}")
         return fitness
     
+    def _evaluate_population_with_replenishing_concurrency(self) -> List[tuple[Individual, bool]]:
+        """
+        使用替补式并发调度逻辑评估当前种群的适应度。
+        
+        该方法是遗传算法世代循环中进行所有 Alpha 模拟、监控和结果处理的核心调度器。
+        它利用 ThreadPoolExecutor 进行并发处理，使用 WQB_API_Client 提交模拟任务，
+        并与 ResultHandler 协作处理每个 Alpha 的结果。
+        
+        返回:
+            List[tuple[Individual, bool]]: 包含 (Individual, is_qualified) 元组的列表，
+                                          其中 is_qualified 表示该 Alpha 是否合格
+        """
+        import concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import queue
+        import time
+        
+        self.logger.info(f"开始替补式并发评估 {len(self.current_population)} 个个体")
+        
+        # 获取并发配置
+        max_workers = self.config_manager.get("general.max_concurrent_simulations", 5)
+        self.logger.info(f"使用 {max_workers} 个并发线程进行评估")
+        
+        # 初始化任务队列和结果列表
+        tasks_to_submit = queue.Queue()
+        for individual in self.current_population:
+            tasks_to_submit.put(individual)
+        
+        running_futures = {}  # {Future: Individual}
+        evaluation_results = []  # [(Individual, bool)]
+        total_successful_alphas = 0
+        completed_count = 0
+        total_count = len(self.current_population)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 初始提交任务，填满线程池
+            while len(running_futures) < max_workers and not tasks_to_submit.empty():
+                individual = tasks_to_submit.get()
+                future = executor.submit(self._simulate_and_process_individual, individual)
+                running_futures[future] = individual
+                self.logger.debug(f"提交个体任务: {individual.get_expression_str()[:50]}...")
+            
+            # 主循环：处理完成的任务并补充新任务
+            while running_futures:
+                # 等待至少一个任务完成
+                for future in as_completed(running_futures, timeout=1800):
+                    individual = running_futures.pop(future)
+                    completed_count += 1
+                    
+                    try:
+                        # 获取任务结果
+                        result = future.result()
+                        individual_result, is_qualified = result
+                        
+                        # 更新个体信息
+                        individual.fitness_score = individual_result.fitness_score
+                        individual.alpha_id = individual_result.alpha_id
+                        
+                        # 记录结果
+                        evaluation_results.append((individual, is_qualified))
+                        
+                        if is_qualified:
+                            total_successful_alphas += 1
+                            self.logger.info(
+                                f"✓ 个体 {completed_count}/{total_count} 合格 - "
+                                f"Alpha ID: {individual.alpha_id}, 适应度: {individual.fitness_score:.4f}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"✗ 个体 {completed_count}/{total_count} 不合格 - "
+                                f"适应度: {individual.fitness_score:.4f}"
+                            )
+                        
+                        # 打印进度
+                        if completed_count % 10 == 0 or completed_count == total_count:
+                            progress_percent = (completed_count / total_count) * 100
+                            self.logger.info(
+                                f"评估进度: {completed_count}/{total_count} ({progress_percent:.1f}%) - "
+                                f"合格: {total_successful_alphas}"
+                            )
+                    
+                    except Exception as e:
+                        # 处理任务异常
+                        self.logger.error(f"个体评估任务失败: {e}", exc_info=True)
+                        
+                        # 为失败的个体分配极低适应度
+                        individual.fitness_score = float('-inf')
+                        individual.alpha_id = None
+                        evaluation_results.append((individual, False))
+                    
+                    # 补充新任务（如果还有待处理的个体）
+                    if not tasks_to_submit.empty():
+                        new_individual = tasks_to_submit.get()
+                        new_future = executor.submit(self._simulate_and_process_individual, new_individual)
+                        running_futures[new_future] = new_individual
+                        self.logger.debug(f"补充新任务: {new_individual.get_expression_str()[:50]}...")
+                    
+                    # 只处理一个完成的任务，然后重新开始循环
+                    break
+        
+        self.logger.info(
+            f"并发评估完成 - 总计: {total_count}, 合格: {total_successful_alphas} "
+            f"({(total_successful_alphas/total_count)*100:.1f}%)"
+        )
+        
+        return evaluation_results
+    
+    def _simulate_and_process_individual(self, individual: Individual) -> tuple[Individual, bool]:
+        """
+        对单个个体进行模拟和结果处理的完整流程。
+        
+        该方法封装了单个 Alpha 的完整评估流程：
+        1. 构建模拟请求载荷
+        2. 提交到 WQB API 进行模拟
+        3. 监控模拟进度
+        4. 使用 ResultHandler 处理结果
+        
+        参数:
+            individual (Individual): 待评估的个体
+            
+        返回:
+            tuple[Individual, bool]: (更新后的个体, 是否合格)
+        """
+        try:
+            # 1. 构建模拟请求载荷
+            simulation_payload = self._build_simulation_payload(individual)
+            self.logger.debug(f"构建模拟载荷完成: {individual.get_expression_str()[:50]}...")
+            
+            # 2. 提交模拟任务到 WQB API
+            submission_result = self.wqb_api_client.submit_alpha_for_simulation(simulation_payload)
+            if not submission_result or 'simulation_id' not in submission_result:
+                raise ValueError("模拟提交失败：未获得有效的 simulation_id")
+            
+            simulation_id = submission_result['simulation_id']
+            self.logger.debug(f"模拟任务已提交，ID: {simulation_id}")
+            
+            # 3. 监控模拟进度直到完成
+            simulation_result = self.wqb_api_client.monitor_simulation_progress(simulation_id)
+            if not simulation_result:
+                raise ValueError(f"模拟监控失败：simulation_id {simulation_id}")
+            
+            # 检查模拟是否成功完成
+            if not simulation_result.get('success', False):
+                # 模拟失败，可能是由于不可访问操作符等问题
+                error_message = simulation_result.get('message', '未知错误')
+                status = simulation_result.get('status', 'UNKNOWN')
+                self.logger.warning(f"模拟失败，跳过后续处理: {individual.get_expression_str()[:50]}... - {error_message}")
+                
+                # 为失败的个体分配极低适应度，直接返回
+                individual.fitness_score = float('-inf')
+                individual.alpha_id = None
+                return individual, False
+            
+            self.logger.debug(f"模拟完成，ID: {simulation_id}")
+            
+            # 4. 使用 ResultHandler 处理模拟结果
+            alpha_id = simulation_result.get('simulation_id')
+            original_payload = {
+                'regular': individual.get_expression_str(),
+                'settings': simulation_result.get('simulation_settings', {})
+            }
+            wqb_raw_result = simulation_result.get('response_data', {})
+            
+            is_qualified, fitness_score, processing_result = self.result_handler.handle_simulation_result(
+                alpha_id,
+                original_payload,
+                wqb_raw_result
+            )
+            
+            # 5. 解析处理结果（handle_simulation_result现在返回元组）
+            # is_qualified, fitness_score, processing_result 已经从上面的调用中获得
+            alpha_id = processing_result.get('alpha_id')
+            
+            # 6. 更新个体信息
+            individual.fitness_score = fitness_score
+            individual.alpha_id = alpha_id
+            
+            return individual, is_qualified
+            
+        except Exception as e:
+            # 处理模拟或处理过程中的异常
+            self.logger.error(
+                f"个体模拟处理失败: {individual.get_expression_str()[:50]}... - {e}", 
+                exc_info=True
+            )
+            
+            # 为失败的个体分配极低适应度
+            individual.fitness_score = float('-inf')
+            individual.alpha_id = None
+            
+            return individual, False
+    
+    def _build_simulation_payload(self, individual: Individual) -> Dict[str, Any]:
+        """
+        为个体构建 WQB API 模拟请求的载荷。
+        
+        参数:
+            individual (Individual): 需要构建载荷的个体
+            
+        返回:
+            Dict[str, Any]: WQB API 模拟请求载荷
+        """
+        try:
+            # 获取个体的表达式字符串
+            expression_str = individual.get_expression_str()
+            
+            # 构建基础载荷
+            payload = {
+                'expression': expression_str,
+                'simulation_params': individual.simulation_params.copy()
+            }
+            
+            # 添加默认参数（如果个体参数中没有指定）
+            default_params = {
+                'decay': 0,
+                'delay': 1,
+                'truncation': 0.01,
+                'universe': 'TOP3000',
+                'neutralization': None
+            }
+            
+            for key, default_value in default_params.items():
+                if key not in payload['simulation_params']:
+                    payload['simulation_params'][key] = default_value
+            
+            self.logger.debug(f"构建模拟载荷: {expression_str[:50]}...")
+            return payload
+            
+        except Exception as e:
+            self.logger.error(f"构建模拟载荷失败: {e}", exc_info=True)
+            raise ValueError(f"无法为个体构建模拟载荷: {e}")
+    
     def _extract_successful_alphas(self, population: List[Individual]) -> List[Individual]:
         """
         从种群中提取成功的Alpha个体。
@@ -590,41 +843,432 @@ class AlphaEvolutionEngine:
         
         return successful
     
-    def _evolve_population(self, population: List[Individual]) -> List[Individual]:
+    def _generate_next_generation(self, evaluated_population: List[tuple[Individual, bool]]) -> List[Individual]:
         """
-        对种群执行进化操作（选择、交叉、变异）。
+        根据当前代的评估结果生成下一代种群。
+        实现精英选择、交叉、变异和多样性注入机制。
         
         参数:
-            population (List[Individual]): 当前种群
+            evaluated_population (List[tuple[Individual, bool]]): 当前种群的评估结果，
+                                                                  每个元组包含个体和是否合格的布尔值
             
         返回:
-            List[Individual]: 进化后的新种群
+            List[Individual]: 下一代种群
         """
-        self.logger.info("执行种群进化操作")
+        self.logger.info("开始生成下一代种群")
         
-        # 占位符实现 - 实际应该实现选择、交叉、变异算法
-        # 这里简单地生成新的随机个体作为示例
-        new_population = []
+        # 获取配置参数
+        elite_count = self.config_manager.get('ga.elitism_size', 2)
+        crossover_rate = self.config_manager.get('ga.crossover_probability', 0.7)
+        mutation_rate = self.config_manager.get('ga.mutation_probability', 0.2)
+        injection_rate = self.config_manager.get('ga.injection_rate', 0.1)
+        population_size = self.config_manager.get('ga.population_size', 100)
         
-        # 保留一些最优个体（精英选择）
-        population.sort(key=lambda x: x.fitness_score, reverse=True)
-        elite_size = max(1, len(population) // 10)  # 保留10%的精英
-        new_population.extend(population[:elite_size])
+        # 分离合格和不合格个体
+        qualified_individuals = [ind for ind, is_qualified in evaluated_population if is_qualified]
+        all_individuals = [ind for ind, _ in evaluated_population]
         
-        # 生成其余个体
-        while len(new_population) < len(population):
+        # 按适应度排序
+        qualified_individuals.sort(key=lambda x: x.fitness_score, reverse=True)
+        all_individuals.sort(key=lambda x: x.fitness_score, reverse=True)
+        
+        next_generation = []
+        
+        # 1. 精英选择：保留最优的合格个体
+        if qualified_individuals:
+            elite_size = min(elite_count, len(qualified_individuals))
+            elites = qualified_individuals[:elite_size]
+            next_generation.extend(elites)
+            self.logger.info(f"精英选择：保留 {elite_size} 个最优个体")
+        else:
+            # 如果没有合格个体，从所有个体中选择精英
+            elite_size = min(elite_count, len(all_individuals))
+            elites = all_individuals[:elite_size]
+            next_generation.extend(elites)
+            self.logger.warning(f"无合格个体，从所有个体中选择 {elite_size} 个精英")
+        
+        # 2. 生成剩余个体
+        while len(next_generation) < population_size:
             try:
-                new_individual = self.generate_random_individual()
-                new_population.append(new_individual)
+                # 决定是否进行多样性注入
+                if random.random() < injection_rate:
+                    # 多样性注入：生成全新的随机个体
+                    new_individual = self.generate_random_individual()
+                    next_generation.append(new_individual)
+                    self.logger.debug("注入新的随机个体")
+                else:
+                    # 选择父代进行交叉和变异
+                    parent_pool = qualified_individuals if qualified_individuals else all_individuals
+                    if len(parent_pool) >= 2:
+                        parent1, parent2 = self._select_parents(parent_pool)
+                        
+                        # 交叉操作
+                        if random.random() < crossover_rate:
+                            child = self._crossover(parent1, parent2)
+                            self.logger.debug("执行交叉操作")
+                        else:
+                            # 如果不交叉，随机选择一个父代作为基础
+                            child = self._copy_individual(random.choice([parent1, parent2]))
+                        
+                        # 变异操作
+                        if random.random() < mutation_rate:
+                            child = self._mutate(child)
+                            self.logger.debug("执行变异操作")
+                        
+                        next_generation.append(child)
+                    else:
+                        # 父代不足，生成随机个体
+                        new_individual = self.generate_random_individual()
+                        next_generation.append(new_individual)
+                        
             except Exception as e:
-                self.logger.error(f"生成新个体时发生错误: {e}")
+                self.logger.error(f"生成下一代个体时发生错误: {e}")
                 self.logger.error(f"错误详情: {type(e).__name__}: {str(e)}")
                 import traceback
                 self.logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
-                break
+                # 发生错误时生成随机个体作为备选
+                try:
+                    backup_individual = self.generate_random_individual()
+                    next_generation.append(backup_individual)
+                except Exception as backup_e:
+                    self.logger.error(f"生成备选个体也失败: {backup_e}")
+                    break
         
-        self.logger.info(f"进化完成，新种群大小: {len(new_population)}")
-        return new_population
+        # 确保种群大小正确
+        if len(next_generation) > population_size:
+            next_generation = next_generation[:population_size]
+        elif len(next_generation) < population_size:
+            # 补充随机个体
+            while len(next_generation) < population_size:
+                try:
+                    supplement_individual = self.generate_random_individual()
+                    next_generation.append(supplement_individual)
+                except Exception as e:
+                    self.logger.error(f"补充个体失败: {e}")
+                    break
+        
+        self.logger.info(f"下一代种群生成完成，大小: {len(next_generation)}")
+        return next_generation
+    
+    def _select_parents(self, parent_pool: List[Individual]) -> tuple[Individual, Individual]:
+        """
+        从父代池中选择两个父代进行繁殖。
+        使用锦标赛选择法。
+        
+        参数:
+            parent_pool (List[Individual]): 可选择的父代池
+            
+        返回:
+            tuple[Individual, Individual]: 选中的两个父代
+        """
+        tournament_size = self.config_manager.get('ga.tournament_size', 3)
+        tournament_size = min(tournament_size, len(parent_pool))
+        
+        def tournament_selection() -> Individual:
+            """锦标赛选择一个个体"""
+            tournament = random.sample(parent_pool, tournament_size)
+            return max(tournament, key=lambda x: x.fitness_score)
+        
+        parent1 = tournament_selection()
+        parent2 = tournament_selection()
+        
+        # 确保两个父代不是同一个对象
+        max_attempts = 10
+        attempts = 0
+        while parent1 is parent2 and len(parent_pool) > 1 and attempts < max_attempts:
+            parent2 = tournament_selection()
+            attempts += 1
+        
+        return parent1, parent2
+    
+    def _crossover(self, parent1: Individual, parent2: Individual) -> Individual:
+        """
+        对两个父代进行交叉操作，生成子代。
+        
+        参数:
+            parent1 (Individual): 第一个父代
+            parent2 (Individual): 第二个父代
+            
+        返回:
+            Individual: 交叉后的子代
+        """
+        self.logger.debug(f"执行交叉操作: 父代1适应度={parent1.fitness_score:.4f}, 父代2适应度={parent2.fitness_score:.4f}")
+        
+        # 参数交叉：随机选择每个模拟参数来自哪个父代
+        genes = self.config_manager.get('ga.genes', ['decay', 'universe', 'neutralization'])
+        child_sim_params = {}
+        
+        for gene in genes:
+            if gene in parent1.simulation_params and gene in parent2.simulation_params:
+                # 随机选择来自父代1或父代2的参数值
+                if random.random() < 0.5:
+                    child_sim_params[gene] = parent1.simulation_params[gene]
+                else:
+                    child_sim_params[gene] = parent2.simulation_params[gene]
+            elif gene in parent1.simulation_params:
+                child_sim_params[gene] = parent1.simulation_params[gene]
+            elif gene in parent2.simulation_params:
+                child_sim_params[gene] = parent2.simulation_params[gene]
+        
+        # 复制其他参数（非基因参数）
+        for key, value in parent1.simulation_params.items():
+            if key not in genes and key not in child_sim_params:
+                child_sim_params[key] = value
+        
+        # 结构交叉（AST交叉）
+        child_ast = None
+        alpha_generation_mode = self.config_manager.get('ga.alpha_generation_mode', 'template_based')
+        
+        if alpha_generation_mode == 'structural_based':
+            # 在结构模式下，尝试进行AST交叉
+            # 注意：这里调用utils.py中的AST功能，即使它们可能是占位符实现
+            try:
+                from .utils import parse_expression_to_ast, generate_expression_from_ast
+                
+                # 简单的AST交叉：随机选择一个父代的AST作为基础
+                # 更复杂的交叉可以在utils.py中实现专门的AST交叉函数
+                if random.random() < 0.5:
+                    child_ast = parent1.expression_ast
+                else:
+                    child_ast = parent2.expression_ast
+                
+                self.logger.debug("结构模式下执行AST交叉（当前为简单选择）")
+                
+                # TODO: 在utils.py中实现更复杂的AST交叉算法
+                # 例如：child_ast = crossover_ast(parent1.expression_ast, parent2.expression_ast)
+                
+            except ImportError as e:
+                self.logger.warning(f"无法导入AST工具函数，使用父代1的AST: {e}")
+                child_ast = parent1.expression_ast
+            except Exception as e:
+                self.logger.error(f"AST交叉过程中发生错误: {e}")
+                child_ast = parent1.expression_ast
+        else:
+            # 在模板模式下，随机选择一个父代的AST
+            child_ast = parent1.expression_ast if random.random() < 0.5 else parent2.expression_ast
+        
+        # 创建子代个体
+        child = Individual(
+            expression_ast=child_ast,
+            simulation_params=child_sim_params
+        )
+        
+        self.logger.debug(f"交叉完成，生成子代")
+        return child
+    
+    def _mutate(self, individual: Individual) -> Individual:
+        """
+        对个体进行变异操作。
+        
+        参数:
+            individual (Individual): 要变异的个体
+            
+        返回:
+            Individual: 变异后的个体
+        """
+        self.logger.debug(f"执行变异操作: 个体适应度={individual.fitness_score:.4f}")
+        
+        # 创建个体的副本进行变异
+        mutated_individual = self._copy_individual(individual)
+        
+        # 参数变异：随机选择一个基因进行变异
+        genes = self.config_manager.get('ga.genes', ['decay', 'universe', 'neutralization'])
+        available_genes = [gene for gene in genes if gene in mutated_individual.simulation_params]
+        
+        if available_genes:
+            gene_to_mutate = random.choice(available_genes)
+            
+            # 获取该基因的可选值范围
+            gene_options = self._get_gene_options(gene_to_mutate)
+            if gene_options:
+                new_value = random.choice(gene_options)
+                old_value = mutated_individual.simulation_params[gene_to_mutate]
+                mutated_individual.simulation_params[gene_to_mutate] = new_value
+                self.logger.debug(f"参数变异: {gene_to_mutate} 从 {old_value} 变为 {new_value}")
+        
+        # 结构变异（AST变异）
+        alpha_generation_mode = self.config_manager.get('ga.alpha_generation_mode', 'template_based')
+        
+        if alpha_generation_mode == 'structural_based':
+            # 在结构模式下，尝试进行AST变异
+            try:
+                from .utils import parse_expression_to_ast, generate_expression_from_ast
+                
+                # 简单的AST变异：这里是占位符实现
+                # 实际的AST变异应该在utils.py中实现专门的函数
+                
+                self.logger.debug("结构模式下执行AST变异（当前为占位符实现）")
+                
+                # TODO: 在utils.py中实现AST变异算法
+                # 例如：mutated_individual.expression_ast = mutate_ast(mutated_individual.expression_ast)
+                # 当前保持AST不变
+                
+            except ImportError as e:
+                self.logger.warning(f"无法导入AST工具函数，跳过AST变异: {e}")
+            except Exception as e:
+                self.logger.error(f"AST变异过程中发生错误: {e}")
+        
+        # 重置适应度分数，因为个体已经改变
+        mutated_individual.fitness_score = 0.0
+        mutated_individual.alpha_id = None
+        
+        self.logger.debug(f"变异完成")
+        return mutated_individual
+    
+    def _copy_individual(self, individual: Individual) -> Individual:
+        """
+        创建个体的深度副本。
+        
+        参数:
+            individual (Individual): 要复制的个体
+            
+        返回:
+            Individual: 个体的副本
+        """
+        import copy
+        
+        copied_individual = Individual(
+            expression_ast=copy.deepcopy(individual.expression_ast),
+            simulation_params=copy.deepcopy(individual.simulation_params)
+        )
+        
+        # 复制其他属性
+        copied_individual.fitness_score = individual.fitness_score
+        copied_individual.alpha_id = individual.alpha_id
+        
+        return copied_individual
+    
+    def _get_gene_options(self, gene_name: str) -> List[Any]:
+        """
+        获取指定基因的可选值范围。
+        
+        参数:
+            gene_name (str): 基因名称
+            
+        返回:
+            List[Any]: 该基因的可选值列表
+        """
+        # 根据基因名称返回相应的可选值
+        # 这些值应该与generate_random_individual中使用的值保持一致
+        
+        if gene_name == 'decay':
+            return list(range(1, 21))  # 1-20
+        elif gene_name == 'universe':
+            return ['TOP_2000_LIQUID', 'TOP_3000', 'TOP_1000']
+        elif gene_name == 'neutralization':
+            return ['SUBINDUSTRY', 'INDUSTRY', 'SECTOR', 'NONE']
+        else:
+            # 对于未知基因，尝试从配置中获取
+            gene_config_key = f'ga.gene_options.{gene_name}'
+            return self.config_manager.get(gene_config_key, [])
+    
+    def _adjust_population_size(self, successful_this_gen: int) -> None:
+        """
+        根据当前代的成功Alpha数量自适应调整种群大小和遗传参数。
+        
+        参数:
+            successful_this_gen (int): 当前代成功发现的合格Alpha数量
+        """
+        if len(self.current_population) == 0:
+            self.logger.warning("当前种群为空，跳过自适应调整")
+            return
+        
+        # 计算当前代的成功率
+        success_rate = successful_this_gen / len(self.current_population)
+        self.logger.info(f"当前代成功率: {success_rate:.4f} ({successful_this_gen}/{len(self.current_population)})")
+        
+        # 获取自适应调整配置
+        adjust_thresholds = self.config_manager.get('ga.population_adjust_thresholds', {})
+        crossover_rules = self.config_manager.get('ga.adaptive_crossover_rate_rules', {})
+        mutation_rules = self.config_manager.get('ga.adaptive_mutation_rate_rules', {})
+        
+        # 获取种群大小限制
+        min_pop_size = self.config_manager.get('ga.min_population_size', 20)
+        max_pop_size = self.config_manager.get('ga.max_population_size', 200)
+        
+        # 1. 自适应调整种群大小
+        current_pop_size = len(self.current_population)
+        new_pop_size = current_pop_size
+        
+        low_threshold = adjust_thresholds.get('low_success_rate', 0.05)
+        high_threshold = adjust_thresholds.get('high_success_rate', 0.20)
+        
+        if success_rate < low_threshold:
+            # 成功率过低，扩大种群
+            expand_factor = adjust_thresholds.get('expand_factor_high', 2.0)
+            new_pop_size = int(current_pop_size * expand_factor)
+            self.logger.info(f"成功率过低 ({success_rate:.4f} < {low_threshold})，扩大种群: {current_pop_size} -> {new_pop_size}")
+        elif success_rate < high_threshold:
+            # 成功率较低，适度扩大种群
+            expand_factor = adjust_thresholds.get('expand_factor_low', 1.5)
+            new_pop_size = int(current_pop_size * expand_factor)
+            self.logger.info(f"成功率较低 ({success_rate:.4f} < {high_threshold})，适度扩大种群: {current_pop_size} -> {new_pop_size}")
+        elif success_rate > high_threshold:
+            # 成功率较高，可以收缩种群以提高效率
+            shrink_factor = adjust_thresholds.get('shrink_factor', 0.7)
+            new_pop_size = int(current_pop_size * shrink_factor)
+            self.logger.info(f"成功率较高 ({success_rate:.4f} > {high_threshold})，收缩种群: {current_pop_size} -> {new_pop_size}")
+        
+        # 确保种群大小在合理范围内
+        new_pop_size = max(min_pop_size, min(new_pop_size, max_pop_size))
+        
+        if new_pop_size != current_pop_size:
+            # 更新种群大小配置
+            self.config_manager.set_runtime_param("ga", "population_size", new_pop_size)
+            self.logger.info(f"种群大小已调整为: {new_pop_size} (限制范围: {min_pop_size}-{max_pop_size})")
+        
+        # 2. 自适应调整交叉率
+        current_crossover_rate = self.config_manager.get('ga.crossover_probability', 0.7)
+        new_crossover_rate = current_crossover_rate
+        
+        crossover_low = crossover_rules.get('low_success_rate', 0.05)
+        crossover_medium = crossover_rules.get('medium_success_rate', 0.15)
+        crossover_high = crossover_rules.get('high_success_rate', 0.25)
+        
+        if success_rate < crossover_low:
+            # 成功率很低，提高交叉率以增加探索
+            new_crossover_rate = crossover_rules.get('rate_for_low', 0.8)
+            self.logger.info(f"成功率很低，提高交叉率: {current_crossover_rate:.3f} -> {new_crossover_rate:.3f}")
+        elif success_rate < crossover_medium:
+            # 成功率中等偏低，使用中等交叉率
+            new_crossover_rate = crossover_rules.get('rate_for_medium', 0.7)
+            self.logger.info(f"成功率中等偏低，调整交叉率: {current_crossover_rate:.3f} -> {new_crossover_rate:.3f}")
+        elif success_rate >= crossover_high:
+            # 成功率较高，降低交叉率以保持稳定
+            new_crossover_rate = crossover_rules.get('rate_for_high', 0.6)
+            self.logger.info(f"成功率较高，降低交叉率: {current_crossover_rate:.3f} -> {new_crossover_rate:.3f}")
+        
+        if abs(new_crossover_rate - current_crossover_rate) > 0.01:  # 避免微小变化
+            self.config_manager.set_runtime_param("ga", "crossover_probability", new_crossover_rate)
+            self.logger.info(f"交叉率已调整为: {new_crossover_rate:.3f}")
+        
+        # 3. 自适应调整变异率
+        current_mutation_rate = self.config_manager.get('ga.mutation_probability', 0.2)
+        new_mutation_rate = current_mutation_rate
+        
+        mutation_low = mutation_rules.get('low_success_rate', 0.05)
+        mutation_medium = mutation_rules.get('medium_success_rate', 0.15)
+        mutation_high = mutation_rules.get('high_success_rate', 0.25)
+        
+        if success_rate < mutation_low:
+            # 成功率很低，提高变异率以增加多样性
+            new_mutation_rate = mutation_rules.get('rate_for_low', 0.3)
+            self.logger.info(f"成功率很低，提高变异率: {current_mutation_rate:.3f} -> {new_mutation_rate:.3f}")
+        elif success_rate < mutation_medium:
+            # 成功率中等偏低，使用中等变异率
+            new_mutation_rate = mutation_rules.get('rate_for_medium', 0.2)
+            self.logger.info(f"成功率中等偏低，调整变异率: {current_mutation_rate:.3f} -> {new_mutation_rate:.3f}")
+        elif success_rate >= mutation_high:
+            # 成功率较高，降低变异率以减少破坏性变化
+            new_mutation_rate = mutation_rules.get('rate_for_high', 0.1)
+            self.logger.info(f"成功率较高，降低变异率: {current_mutation_rate:.3f} -> {new_mutation_rate:.3f}")
+        
+        if abs(new_mutation_rate - current_mutation_rate) > 0.01:  # 避免微小变化
+            self.config_manager.set_runtime_param("ga", "mutation_probability", new_mutation_rate)
+            self.logger.info(f"变异率已调整为: {new_mutation_rate:.3f}")
+        
+        # 记录自适应调整总结
+        self.logger.info(f"自适应调整完成 - 成功率: {success_rate:.4f}, 种群大小: {new_pop_size}, 交叉率: {new_crossover_rate:.3f}, 变异率: {new_mutation_rate:.3f}")
     
     def _save_checkpoint(self, population: List[Individual], generation: int) -> None:
         """

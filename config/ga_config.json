@@ -48,5 +48,28 @@
     "invalid_penalty_factor": 0.1,
     "epsilon": 1e-6,
     "turnover_power": 1.0
+  },
+  "population_adjust_thresholds": {
+    "low_success_rate": 0.05,
+    "high_success_rate": 0.20,
+    "expand_factor_low": 1.5,
+    "expand_factor_high": 2.0,
+    "shrink_factor": 0.7
+  },
+  "adaptive_crossover_rate_rules": {
+    "low_success_rate": 0.05,
+    "medium_success_rate": 0.15,
+    "high_success_rate": 0.25,
+    "rate_for_low": 0.8,
+    "rate_for_medium": 0.7,
+    "rate_for_high": 0.6
+  },
+  "adaptive_mutation_rate_rules": {
+    "low_success_rate": 0.05,
+    "medium_success_rate": 0.15,
+    "high_success_rate": 0.25,
+    "rate_for_low": 0.3,
+    "rate_for_medium": 0.2,
+    "rate_for_high": 0.1
   }
 }
