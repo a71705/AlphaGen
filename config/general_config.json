@@ -15,7 +15,7 @@
   "api_base_url": "https://api.worldquantbrain.com/",
   "api_timeout_seconds": 60,
   "api_max_retries": 3,
-  "credentials_file": "config/credentials.json",
+  "credentials_file": "C:\\Users\\Administrator\\secrets\\platform-brain.json",
   "session_pkl_file": "data/session.pkl",
   "max_concurrent_simulations": 5,
   "data_paths": {
@@ -30,6 +30,9 @@
   "api_retry_after_default_seconds": 5,
   "api_retry_backoff_factor": 1,
   "api_retry_max_backoff_seconds": 30,
+  "default_dataset_id": "fundamental6",
+  "default_universe": "TOP3000",
+  "default_delay": 1,
   "default_instrument_type": "EQUITY",
   "default_region": "USA",
   "default_language": "FASTEXPR",
@@ -42,5 +45,8 @@
   "simulation_poll_timeout_seconds": 300,
   "api_poll_interval_seconds": 5,
   "get_pnl": true,
-  "get_yearly_stats": true
+  "get_yearly_stats": true,
+  "api": {
+    "datafields_params": {}
+  }
 }

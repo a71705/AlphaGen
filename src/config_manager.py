@@ -111,6 +111,7 @@ class ConfigManager:
             ("operator_sets.json", "operator_sets", self.config_base_path),
             ("ga_config.json", "ga", self.config_base_path),
             ("available_datafields.json", "datafields", self.data_base_path),
+            ("available_datasets.json", "datasets", self.data_base_path),
             ("inaccessible_ops_blacklist.json", "blacklist", self.data_base_path),
         ]
 
@@ -210,6 +211,121 @@ class ConfigManager:
             self.logger.info(f"可用数据字段列表已更新并保存，共 {len(datafields)} 个条目。")
         else:
             self.logger.error("可用数据字段列表更新后，保存到文件失败。")
+
+    def set_datasets(self, datasets: list):
+        """
+        更新内存中的可用数据集列表，并将其持久化保存到JSON文件。
+
+        Args:
+            datasets (list): 新的可用数据集列表。
+
+        Returns:
+            None
+        """
+        if not isinstance(datasets, list):
+            self.logger.error("set_datasets 接收到的参数不是列表类型。")
+            return
+
+        self.config['datasets'] = datasets  # 更新内存中的配置
+
+        file_path = os.path.join(self.data_base_path, "available_datasets.json")
+
+        if self._save_config_file(file_path, datasets):
+            self.logger.info(f"可用数据集列表已更新并保存，共 {len(datasets)} 个条目。")
+        else:
+            self.logger.error("可用数据集列表更新后，保存到文件失败。")
+
+    def set_dataset_datafields(self, dataset_id: str, datafields: list):
+        """
+        更新指定数据集的数据字段列表，并将其持久化保存到单独的JSON文件。
+
+        Args:
+            dataset_id (str): 数据集ID。
+            datafields (list): 该数据集的数据字段列表。
+
+        Returns:
+            None
+        """
+        if not isinstance(datafields, list):
+            self.logger.error("set_dataset_datafields 接收到的数据字段参数不是列表类型。")
+            return
+        
+        if not isinstance(dataset_id, str) or not dataset_id.strip():
+            self.logger.error("set_dataset_datafields 接收到的数据集ID无效。")
+            return
+
+        # 确保数据集字段目录存在
+        dataset_fields_dir = os.path.join(self.data_base_path, "dataset_fields")
+        if not os.path.exists(dataset_fields_dir):
+            os.makedirs(dataset_fields_dir)
+            self.logger.info(f"数据集字段目录 {dataset_fields_dir} 不存在，已创建。")
+
+        # 更新内存中的配置
+        if 'dataset_fields' not in self.config:
+            self.config['dataset_fields'] = {}
+        self.config['dataset_fields'][dataset_id] = datafields
+
+        # 保存到单独的文件
+        file_path = os.path.join(dataset_fields_dir, f"{dataset_id}_fields.json")
+
+        if self._save_config_file(file_path, datafields):
+            self.logger.info(f"数据集 {dataset_id} 的数据字段列表已更新并保存，共 {len(datafields)} 个条目。")
+        else:
+            self.logger.error(f"数据集 {dataset_id} 的数据字段列表更新后，保存到文件失败。")
+
+    def get_dataset_datafields(self, dataset_id: str) -> list:
+        """
+        获取指定数据集的数据字段列表。
+
+        Args:
+            dataset_id (str): 数据集ID。
+
+        Returns:
+            list: 该数据集的数据字段列表，如果不存在则返回空列表。
+        """
+        if not isinstance(dataset_id, str) or not dataset_id.strip():
+            self.logger.warning("get_dataset_datafields 接收到的数据集ID无效。")
+            return []
+
+        # 首先尝试从内存中获取
+        if 'dataset_fields' in self.config and dataset_id in self.config['dataset_fields']:
+            return self.config['dataset_fields'][dataset_id]
+
+        # 如果内存中没有，尝试从文件加载
+        dataset_fields_dir = os.path.join(self.data_base_path, "dataset_fields")
+        file_path = os.path.join(dataset_fields_dir, f"{dataset_id}_fields.json")
+        
+        datafields = self._load_json_file(file_path)
+        if isinstance(datafields, list):
+            # 加载成功，更新内存缓存
+            if 'dataset_fields' not in self.config:
+                self.config['dataset_fields'] = {}
+            self.config['dataset_fields'][dataset_id] = datafields
+            return datafields
+        
+        self.logger.warning(f"未找到数据集 {dataset_id} 的数据字段文件或文件格式错误。")
+        return []
+
+    def get_all_dataset_datafields(self) -> dict:
+        """
+        获取所有数据集的数据字段列表。
+
+        Returns:
+            dict: 以数据集ID为键，数据字段列表为值的字典。
+        """
+        all_fields = {}
+        
+        # 从文件系统扫描所有数据集字段文件
+        dataset_fields_dir = os.path.join(self.data_base_path, "dataset_fields")
+        if os.path.exists(dataset_fields_dir):
+            for filename in os.listdir(dataset_fields_dir):
+                if filename.endswith('_fields.json'):
+                    dataset_id = filename[:-12]  # 移除 '_fields.json' 后缀
+                    datafields = self.get_dataset_datafields(dataset_id)
+                    if datafields:
+                        all_fields[dataset_id] = datafields
+        
+        return all_fields
 
     def set_blacklist(self, blacklist: list):
         """

@@ -195,7 +195,7 @@ class SystemOrchestrator:
             print("="*40)
             print("  主菜单:")
             print("  1. 启动 Alpha 挖掘 (遗传优化)")
-            print("  2. 爬取/更新 WQB 数据字段列表")
+            print("  2. 爬取/更新 WQB 数据集和数据字段")
             print("  3. 查看已发现的合格 Alpha")
             print("  4. 系统设置")
             print("  5. 黑名单管理")
@@ -268,9 +268,9 @@ class SystemOrchestrator:
             print("请检查日志获取详细信息。")
 
     def _update_datafields(self) -> None:
-        """处理用户请求爬取或更新WQB可用数据字段列表。"""
-        self.logger.info("用户选择更新WQB数据字段列表。")
-        print("\n--- 更新 WQB 数据字段列表 ---")
+        """处理用户请求爬取或更新WQB可用数据集和数据字段列表。"""
+        self.logger.info("用户选择更新WQB数据集和数据字段列表。")
+        print("\n--- 更新 WQB 数据集和数据字段列表 ---")
 
         if not self.wqb_api_client:
             self.logger.error("WQBAPIClient 未初始化，无法更新数据字段。")
@@ -278,27 +278,53 @@ class SystemOrchestrator:
             return
 
         try:
-            print("正在从WQB平台获取可用的数据字段列表，请稍候...")
-            # 假设 WQB_API_Client.get_available_datafields() 已实现 (T3.x)
-            # 并且它内部会调用 config_manager.set_datafields()
-            data_fields_list = self.wqb_api_client.get_available_datafields()
+            # 第一步：获取数据集列表
+            print("第一步：正在从WQB平台获取可用的数据集列表，请稍候...")
+            datasets_list = self.wqb_api_client.get_available_datafields()  # 这个方法现在返回数据集列表
 
-            if data_fields_list is not None:
-                count = len(data_fields_list)
-                self.logger.info(f"成功获取并更新了 {count} 个WQB数据字段。")
-                print(f"\n成功更新了 {count} 个数据字段。列表已保存。") # 假设保存发生在get_available_datafields内部
-                if 0 < count < 20 :
-                    print("获取到的数据字段:")
-                    for field in data_fields_list: print(f"  - {field}")
-                elif count == 0:
-                    print("WQB平台当前未返回任何可用数据字段（或获取结果为空列表）。")
+            if datasets_list is not None and len(datasets_list) > 0:
+                datasets_count = len(datasets_list)
+                self.logger.info(f"成功获取并更新了 {datasets_count} 个WQB数据集。")
+                print(f"\n成功更新了 {datasets_count} 个数据集。")
+                
+                if 0 < datasets_count < 20:
+                    print("获取到的数据集:")
+                    for dataset in datasets_list:
+                        if isinstance(dataset, dict) and 'id' in dataset:
+                            dataset_name = dataset.get('name', dataset['id'])
+                            print(f"  - {dataset['id']}: {dataset_name}")
+                        else:
+                            print(f"  - {dataset}")
+                
+                # 第二步：获取所有数据集的数据字段
+                print("\n第二步：正在获取所有数据集的数据字段，这可能需要一些时间...")
+                all_dataset_fields = self.wqb_api_client.get_all_datasets_datafields()
+                
+                if all_dataset_fields:
+                    total_fields = sum(len(fields) for fields in all_dataset_fields.values())
+                    self.logger.info(f"成功获取了 {len(all_dataset_fields)} 个数据集的共 {total_fields} 个数据字段。")
+                    print(f"\n成功获取了 {len(all_dataset_fields)} 个数据集的共 {total_fields} 个数据字段。")
+                    
+                    # 显示每个数据集的字段数量
+                    print("\n各数据集的数据字段数量:")
+                    for dataset_id, fields in all_dataset_fields.items():
+                        print(f"  - {dataset_id}: {len(fields)} 个字段")
+                    
+                    print("\n所有数据已保存到单独的文件中，避免单个文件过大。")
+                else:
+                    self.logger.warning("未能获取到任何数据集的数据字段。")
+                    print("\n警告：未能获取到任何数据集的数据字段。")
+                
+            elif datasets_list is not None and len(datasets_list) == 0:
+                self.logger.info("WQB平台当前未返回任何可用数据集。")
+                print("\nWQB平台当前未返回任何可用数据集（或获取结果为空列表）。")
             else:
-                self.logger.warning("未能获取到WQB数据字段列表（API客户端返回None）。")
-                print("\n未能获取到WQB数据字段列表。请检查日志（可能包括API错误、网络问题或权限不足）。")
+                self.logger.warning("未能获取到WQB数据集列表（API客户端返回None）。")
+                print("\n未能获取到WQB数据集列表。请检查日志（可能包括API错误、网络问题或权限不足）。")
 
         except Exception as e:
-            self.logger.error(f"更新WQB数据字段列表时发生未知错误: {e}", exc_info=True)
-            print(f"\n在更新数据字段列表过程中发生错误: {e}")
+            self.logger.error(f"更新WQB数据集和数据字段列表时发生未知错误: {e}", exc_info=True)
+            print(f"\n在更新数据集和数据字段列表过程中发生错误: {e}")
             print("请检查日志获取详细信息。")
 
     def _view_successful_alphas(self) -> None:

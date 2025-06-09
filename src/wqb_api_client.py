@@ -50,19 +50,19 @@ class WQB_API_Client:
             self.logger.warning(f"配置中的 'blacklist' 不是列表类型，已重置为空列表。收到的类型: {type(self._inaccessible_ops_blacklist)}")
             self._inaccessible_ops_blacklist = []
 
-        self.logger.info(f"API Base URL: {self.base_url}")
-        self.logger.info(f"Credentials File: {self.credentials_file}")
-        self.logger.info(f"Session Pickle File: {self.session_pkl_file}")
-        self.logger.info(f"Max Concurrent Simulations for Monitor: {max_monitor_workers}")
-        self.logger.info(f"Inaccessible Ops Blacklist条目数: {len(self._inaccessible_ops_blacklist)}")
+        self.logger.info(f"API Base URL: {self.base_url}") # 记录API基础URL
+        self.logger.info(f"Credentials File: {self.credentials_file}") # 记录凭证文件路径
+        self.logger.info(f"Session Pickle File: {self.session_pkl_file}") # 记录会话pickle文件路径
+        self.logger.info(f"Max Concurrent Simulations for Monitor: {max_monitor_workers}") # 记录最大并发监控模拟任务数
+        self.logger.info(f"Inaccessible Ops Blacklist条目数: {len(self._inaccessible_ops_blacklist)}") # 记录不可访问操作黑名单的条目数
 
         # 3. 构建API端点URL
-        self.login_endpoint = urljoin(self.base_url, "authentication")
-        self.alpha_endpoint = urljoin(self.base_url, "alphas")
-        self.simulation_endpoint = urljoin(self.base_url, "simulations")
-        self.data_fields_endpoint = urljoin(self.base_url, "data-fields")
-        self.data_sets_endpoint = urljoin(self.base_url, "data-sets")
-        self.logger.info("API 端点已构建。")
+        self.login_endpoint = urljoin(self.base_url, "authentication") # 登录认证API端点
+        self.alpha_endpoint = urljoin(self.base_url, "alphas") # Alpha相关API端点
+        self.simulation_endpoint = urljoin(self.base_url, "simulations") # 模拟相关API端点
+        self.data_fields_endpoint = urljoin(self.base_url, "data-fields") # 数据字段API端点
+        self.data_sets_endpoint = urljoin(self.base_url, "data-sets") # 数据集API端点
+        self.logger.info("API 端点已构建。") # 记录API端点构建完成
 
         # 4. 初始化批处理相关属性
         self._batch_queue = []
@@ -409,6 +409,123 @@ class WQB_API_Client:
 
         self.logger.debug("未从错误消息中匹配到已知的黑名单条目模式。")
 
+    def get_available_datafields(self) -> list:
+        """
+        从WQB API获取可用的数据集列表。
+        
+        该方法会向WQB API的data-sets端点发送GET请求，获取当前可用的数据集列表。
+        成功获取后，会通过ConfigManager将数据集列表持久化保存。
+        
+        Returns:
+            list: 可用数据集ID的列表。如果获取失败，返回空列表。
+            
+        Raises:
+            Exception: 如果API请求失败或响应格式不正确。
+        """
+        self.logger.info("开始从WQB API获取可用数据集列表...")
+        
+        try:
+            # 构建查询参数 - 根据WQB API要求添加必需参数
+            params = {
+                'delay': 1,
+                'instrumentType': 'EQUITY',
+                'limit': 20,
+                'offset': 0,
+                'region': 'USA',
+                'universe': 'TOP3000'
+            }
+            
+            # 从配置中获取自定义参数（如果存在）
+            delay = self.config_manager.get('general.default_delay', 1)
+            instrument_type = self.config_manager.get('general.default_instrument_type', 'EQUITY')
+            region = self.config_manager.get('general.default_region', 'USA')
+            universe = self.config_manager.get('general.default_universe', 'TOP3000')
+            
+            params.update({
+                'delay': delay,
+                'instrumentType': instrument_type,
+                'region': region,
+                'universe': universe
+            })
+            
+            self.logger.debug(f"使用查询参数: {params}")
+            
+            # 收集所有数据集
+            all_datasets = []
+            
+            while True:
+                # 发送GET请求到data-sets端点
+                response = self._send_request_with_retry(
+                    method='GET',
+                    url=self.data_sets_endpoint,
+                    params=params
+                )
+                
+                # 解析响应JSON
+                try:
+                    response_data = response.json()
+                    self.logger.debug(f"收到数据集API响应 (offset={params['offset']}): 数据项数量={len(response_data.get('results', []))}. 响应内容片段: {response.text[:100]}...")
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"解析数据集API响应时发生JSON错误: {e}. 响应内容: {response.text[:500]}...")
+                    # 如果JSON解析失败，则认为没有更多有效数据，中断循环
+                    break
+                
+                # 从 'results' 字段获取数据集列表
+                current_items = response_data.get('results', [])
+                total_count = response_data.get('count', 0)  # 获取总数
+
+                self.logger.debug(f"当前页数据项数量: {len(current_items)}, 总数据项数量: {total_count}, 每页限制: {params['limit']}")
+
+                # 终止条件1: 如果当前页没有数据，则停止
+                if not current_items:
+                    self.logger.info("没有更多数据集，分页获取完成。")
+                    break
+                
+                # 处理当前页的数据集，过滤掉id为"univ1"的数据集
+                for item in current_items:
+                    dataset_id = item.get('id')
+                    if dataset_id and dataset_id != 'univ1':  # 舍弃id为"univ1"的数据集
+                        all_datasets.append(dataset_id)
+                
+                # 终止条件2: 如果已获取的数据量达到或超过API报告的总数，则停止
+                if total_count > 0 and len(all_datasets) >= total_count - 1:  # 减1是因为要舍弃univ1
+                    self.logger.info(f"已获取所有可用数据集，分页获取完成。")
+                    break
+
+                # 终止条件3: 如果当前页数据少于限制数量，说明是最后一页，则停止
+                if len(current_items) < params['limit']:
+                    self.logger.info("当前页数据少于限制数量，已获取所有数据集。")
+                    break
+                
+                # 更新offset以获取下一页
+                params['offset'] += params['limit']
+                self.logger.debug(f"准备获取下一页数据，新offset: {params['offset']}")
+            
+            # 去重并排序
+            unique_datasets = sorted(list(set(all_datasets)))
+            
+            self.logger.info(f"成功获取到 {len(unique_datasets)} 个唯一数据集")
+            
+            # 通过ConfigManager保存数据集列表
+            try:
+                self.config_manager.set_datasets(unique_datasets)
+                self.logger.info("数据集列表已成功保存到配置中")
+            except Exception as save_error:
+                self.logger.error(f"保存数据集列表时发生错误: {save_error}", exc_info=True)
+                # 即使保存失败，仍然返回获取到的数据
+            
+            return unique_datasets
+            
+        except requests.exceptions.RequestException as req_error:
+            self.logger.error(f"获取数据集列表时发生网络错误: {req_error}", exc_info=True)
+            raise Exception(f"网络请求失败: {req_error}")
+        except json.JSONDecodeError as json_error:
+            self.logger.error(f"解析数据集API响应时发生JSON错误: {json_error}", exc_info=True)
+            raise Exception(f"API响应格式错误: {json_error}")
+        except Exception as e:
+            self.logger.error(f"获取数据集列表时发生未知错误: {e}", exc_info=True)
+            raise Exception(f"获取数据集失败: {e}")
+
 
     def _send_request_with_retry(self, method: str, url: str,
                                  json_data: dict = None, params: dict = None,
@@ -506,7 +623,7 @@ class WQB_API_Client:
                 # 对于其他客户端错误 (4xx) 或服务器错误 (5xx)，进行记录和可能的指数退避重试
                 self.logger.error(
                     f"请求 {url} 失败 (尝试 {attempt + 1})，状态码: {response.status_code}。"
-                    f"响应: {response.text[:500]}" # 记录部分响应文本以供调试
+                    f"响应: {response.text}" # 记录完整响应文本以供调试
                 )
                 if attempt == max_retries:
                     self.logger.error(f"已达到最大重试次数 ({max_retries + 1})，请求 {url} 最终失败。")
@@ -629,6 +746,166 @@ class WQB_API_Client:
                 self.logger.critical(f"最终尝试的完整登录也失败了: {login_e}", exc_info=True)
                 # 此处异常会自然向上传播，或者可以抛出特定的会话管理异常
                 raise # 重新抛出登录时发生的异常
+
+    def get_dataset_datafields(self, dataset_id: str) -> list:
+        """
+        获取指定数据集的数据字段列表。
+
+        Args:
+            dataset_id (str): 数据集ID。
+
+        Returns:
+            list: 数据字段列表，如果获取失败则返回空列表。
+        """
+        if not isinstance(dataset_id, str) or not dataset_id.strip():
+            self.logger.error("get_dataset_datafields 接收到的数据集ID无效。")
+            return []
+
+        self.logger.info(f"开始获取数据集 {dataset_id} 的数据字段列表...")
+        
+        # 确保会话有效
+        self.refresh_session_if_needed()
+        
+        all_datafields = []
+        offset = 0
+        limit = 50
+        
+        # 构建基础查询参数
+        base_params = {
+            'dataset.id': dataset_id,
+            'delay': 1,
+            'instrumentType': 'EQUITY',
+            'limit': limit,
+            'region': 'USA',
+            'universe': 'TOP3000'
+        }
+        
+        # 从配置中获取自定义参数（如果有）
+        custom_params = self.config_manager.get('api.datafields_params', {})
+        if custom_params:
+            base_params.update(custom_params)
+            self.logger.debug(f"应用自定义数据字段查询参数: {custom_params}")
+        
+        try:
+            while True:
+                # 设置当前页的offset
+                params = base_params.copy()
+                params['offset'] = offset
+                
+                self.logger.debug(f"请求数据集 {dataset_id} 的数据字段，offset={offset}, limit={limit}")
+                
+                # 发送GET请求
+                response = self._send_request_with_retry(
+                    method='GET',
+                    url=self.data_fields_endpoint,
+                    params=params
+                )
+                
+                if not response:
+                    self.logger.error(f"获取数据集 {dataset_id} 的数据字段时请求失败。")
+                    break
+                
+                try:
+                    data = response.json()
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"解析数据集 {dataset_id} 的数据字段响应JSON失败: {e}")
+                    break
+                
+                # 提取数据字段列表
+                current_datafields = []
+                if 'results' in data and isinstance(data['results'], list):
+                    current_datafields = data['results']
+                elif 'data' in data and isinstance(data['data'], list):
+                    current_datafields = data['data']
+                else:
+                    self.logger.warning(f"数据集 {dataset_id} 的响应中未找到 'results' 或 'data' 字段，或字段不是列表类型。")
+                    break
+                
+                if not current_datafields:
+                    self.logger.info(f"数据集 {dataset_id} 在offset={offset}处没有更多数据字段，停止分页。")
+                    break
+                
+                all_datafields.extend(current_datafields)
+                self.logger.debug(f"数据集 {dataset_id} 当前页获取到 {len(current_datafields)} 个数据字段")
+                
+                # 检查是否需要继续分页
+                total_count = data.get('count', 0)
+                if total_count > 0 and len(all_datafields) >= total_count:
+                    self.logger.info(f"数据集 {dataset_id} 已获取所有数据字段 (总数: {total_count})")
+                    break
+                
+                if len(current_datafields) < limit:
+                    self.logger.info(f"数据集 {dataset_id} 当前页数据字段数量 ({len(current_datafields)}) 少于限制 ({limit})，停止分页。")
+                    break
+                
+                offset += limit
+                
+                # 防止无限循环的安全检查
+                if offset > 10000:  # 假设单个数据集不会超过10000个字段
+                    self.logger.warning(f"数据集 {dataset_id} 的数据字段获取已达到安全限制 (offset > 10000)，停止分页。")
+                    break
+        
+        except Exception as e:
+            self.logger.error(f"获取数据集 {dataset_id} 的数据字段时发生异常: {e}", exc_info=True)
+            return []
+        
+        # 去重和排序
+        unique_datafields = []
+        seen_ids = set()
+        for field in all_datafields:
+            if isinstance(field, dict) and 'id' in field:
+                field_id = field['id']
+                if field_id not in seen_ids:
+                    seen_ids.add(field_id)
+                    unique_datafields.append(field)
+        
+        # 按字段ID排序
+        unique_datafields.sort(key=lambda x: x.get('id', ''))
+        
+        self.logger.info(f"数据集 {dataset_id} 共获取到 {len(unique_datafields)} 个唯一数据字段")
+        
+        # 保存到配置管理器
+        try:
+            self.config_manager.set_dataset_datafields(dataset_id, unique_datafields)
+        except Exception as e:
+            self.logger.error(f"保存数据集 {dataset_id} 的数据字段到配置管理器失败: {e}")
+        
+        return unique_datafields
+
+    def get_all_datasets_datafields(self) -> dict:
+        """
+        获取所有数据集的数据字段列表。
+
+        Returns:
+            dict: 以数据集ID为键，数据字段列表为值的字典。
+        """
+        self.logger.info("开始获取所有数据集的数据字段列表...")
+        
+        # 首先获取数据集列表
+        datasets = self.get_available_datafields()  # 这个方法现在返回数据集ID字符串列表
+        if not datasets:
+            self.logger.warning("未获取到任何数据集，无法获取数据字段。")
+            return {}
+        
+        self.logger.info(f"获取到 {len(datasets)} 个数据集，开始逐个获取数据字段...")
+        all_dataset_fields = {}
+        
+        for dataset_id in datasets:
+            # 数据集现在是字符串ID，不再是包含'id'字段的对象
+            if isinstance(dataset_id, str) and dataset_id.strip():
+                self.logger.info(f"正在获取数据集 {dataset_id} 的数据字段...")
+                
+                datafields = self.get_dataset_datafields(dataset_id)
+                if datafields:
+                    all_dataset_fields[dataset_id] = datafields
+                    self.logger.info(f"数据集 {dataset_id} 获取到 {len(datafields)} 个数据字段")
+                else:
+                    self.logger.warning(f"数据集 {dataset_id} 未获取到任何数据字段")
+            else:
+                self.logger.warning(f"跳过无效的数据集ID: {dataset_id}")
+        
+        self.logger.info(f"所有数据集数据字段获取完成，共处理 {len(all_dataset_fields)} 个数据集")
+        return all_dataset_fields
 
 # 主程序入口示例 (用于基本测试或演示)
 if __name__ == '__main__':

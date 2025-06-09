@@ -32,22 +32,22 @@ class ResultHandler:
         # 我将使用 alpha_evolution_engine 作为属性名以匹配后续需求
         self.alpha_evolution_engine: Optional['AlphaEvolutionEngine'] = alpha_evolution_engine_ref
 
-        data_base_path = self.config_manager.get("data_paths.base_data_directory", "data")
+        data_base_path = self.config_manager.get("general.data_paths.base_data_directory", "data")
         self.successful_alphas_dir: str = os.path.join(
             data_base_path,
-            self.config_manager.get("data_paths.successful_alphas_subdir", "successful_alphas")
+            self.config_manager.get("general.data_paths.successful_alphas_subdir", "successful_alphas")
         )
         self.alpha_pnl_dir: str = os.path.join(
             data_base_path,
-            self.config_manager.get("data_paths.alpha_pnl_subdir", "alpha_pnl")
+            self.config_manager.get("general.data_paths.alpha_pnl_subdir", "alpha_pnl")
         )
         self.alpha_yearly_stats_dir: str = os.path.join(
             data_base_path,
-            self.config_manager.get("data_paths.alpha_yearly_stats_subdir", "alpha_yearly_stats")
+            self.config_manager.get("general.data_paths.alpha_yearly_stats_subdir", "alpha_yearly_stats")
         )
         self.ga_checkpoints_dir: str = os.path.join(
             data_base_path,
-            self.config_manager.get("data_paths.ga_checkpoints_subdir", "ga_checkpoints")
+            self.config_manager.get("general.data_paths.ga_checkpoints_subdir", "ga_checkpoints")
         )
         self._ensure_directories_exist()
         self.logger.info("ResultHandler 初始化完毕。")

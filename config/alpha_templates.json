@@ -1,9 +1,75 @@
-{
-  "basic_momentum": "ts_rank(close, 20)",
-  "reversal_short_term": "-1 * ts_corr(returns, median_volume, 5)",
-  "value_simple_pe": "1 / pe_ratio",
-  "growth_sales": "ts_growth_rate(sales_ps, 4)",
-  "volatility_adjusted_momentum": "ts_rank(close, 20) / ts_stddev(returns, 20)",
-  "template_with_placeholder": "delay({expression}, {days})",
-  "example_neutralized_alpha": "neutralize(ts_rank(close, 20), market_cap, industry_group)"
-}
+[
+    {
+        "template": "ts_rank(<FIELD1>, <PERIOD>)",
+        "data_space": {
+            "FIELD1": "DATAFIELD",
+            "PERIOD": [5, 10, 20, 60]
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "<BINARY_OP>(<FIELD1>, <FIELD2>)",
+        "data_space": {
+            "FIELD1": "DATAFIELD",
+            "FIELD2": "DATAFIELD",
+            "BINARY_OP": "OPERATOR_BINARY"
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "<TS_OP>(<FIELD>, <PERIOD>)",
+        "data_space": {
+            "FIELD": "DATAFIELD",
+            "TS_OP": "OPERATOR_TS",
+            "PERIOD": "TS_OPS_VALUE"
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "<UNARY_OP>(<FIELD>)",
+        "data_space": {
+            "FIELD": "DATAFIELD",
+            "UNARY_OP": "OPERATOR_UNARY"
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "delay(<EXPRESSION>, <DELAY>)",
+        "data_space": {
+            "EXPRESSION": "DATAFIELD",
+            "DELAY": [0, 1, 2]
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "group_neutralize(<FIELD>, <GROUP>)",
+        "data_space": {
+            "FIELD": "DATAFIELD",
+            "GROUP": ["market", "industry", "sector"]
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "<BINARY_OP>(<TS_OP1>(<FIELD1>, <PERIOD1>), <TS_OP2>(<FIELD2>, <PERIOD2>))",
+        "data_space": {
+            "FIELD1": "DATAFIELD",
+            "FIELD2": "DATAFIELD",
+            "BINARY_OP": "OPERATOR_BINARY",
+            "TS_OP1": "OPERATOR_TS",
+            "TS_OP2": "OPERATOR_TS",
+            "PERIOD1": "TS_OPS_VALUE",
+            "PERIOD2": "TS_OPS_VALUE"
+        },
+        "shared_space": {}
+    },
+    {
+        "template": "<UNARY_OP>(<BINARY_OP>(<FIELD1>, <FIELD2>))",
+        "data_space": {
+            "FIELD1": "DATAFIELD",
+            "FIELD2": "DATAFIELD",
+            "BINARY_OP": "OPERATOR_BINARY",
+            "UNARY_OP": "OPERATOR_UNARY"
+        },
+        "shared_space": {}
+    }
+]

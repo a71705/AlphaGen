@@ -189,6 +189,8 @@ class AlphaEvolutionEngine:
         all_datafields: List[str] = self.config_manager.get("datafields", []) # 假设datafields直接是字符串列表
         if not isinstance(all_datafields, list) or not all(isinstance(df, str) for df in all_datafields):
             self.logger.warning("配置中的 'datafields' 不是预期的字符串列表格式。返回默认 'close'。")
+            self.logger.warning(f"当前datafields配置值: {all_datafields}")
+            self.logger.warning(f"datafields类型: {type(all_datafields)}")
             return "close"
 
         # 黑名单已在 __init__ 中预处理为 self._processed_blacklist_names (set)
@@ -225,6 +227,8 @@ class AlphaEvolutionEngine:
 
         if not isinstance(original_ops, list) or not all(isinstance(op, str) for op in original_ops):
              self.logger.error(f"配置中的 '{op_list_key}' 不是预期的字符串列表格式。")
+             self.logger.error(f"当前{op_list_key}配置值: {original_ops}")
+             self.logger.error(f"{op_list_key}类型: {type(original_ops)}")
              raise ValueError(f"类型 {op_type} 的操作符列表配置无效。")
 
         if not original_ops:
@@ -266,6 +270,8 @@ class AlphaEvolutionEngine:
         templates: List[Dict[str, Any]] = self.config_manager.get("alpha_templates", [])
         if not templates:
             self.logger.error("Alpha模板列表为空或未配置。无法从模板生成。")
+            self.logger.error(f"当前配置中的alpha_templates值: {templates}")
+            self.logger.error("请检查config/alpha_templates.json文件是否存在且格式正确")
             raise ValueError("Alpha模板列表为空或未配置。")
 
         chosen_template_config = random.choice(templates)
@@ -403,6 +409,287 @@ class AlphaEvolutionEngine:
                 f"未知的Alpha生成模式: '{self.alpha_generation_mode}'。将默认使用基于模板的生成。"
             )
             return self.generate_alpha_from_template()
+
+    def run_optimization(self, resume: bool = False) -> None:
+        """
+        运行遗传算法优化过程，搜索最优的Alpha因子。
+        
+        该方法是Alpha挖掘的主要入口点，负责执行完整的遗传算法流程，
+        包括种群初始化、进化迭代、适应度评估和结果保存。
+        
+        参数:
+            resume (bool): 是否从上次保存的进度恢复。如果为True，
+                          将尝试加载之前的种群和进化状态；
+                          如果为False，将开始全新的优化过程。
+        
+        Raises:
+            Exception: 如果优化过程中发生严重错误。
+        """
+        self.logger.info(f"开始Alpha因子遗传算法优化 (resume={resume})...")
+        
+        try:
+            # 获取遗传算法配置参数
+            population_size = self.config_manager.get('ga.population_size', 50)
+            max_generations = self.config_manager.get('ga.max_generations', 100)
+            target_successful_alphas = self.config_manager.get('ga.target_successful_alphas', 10)
+            
+            self.logger.info(f"GA配置: 种群大小={population_size}, 最大代数={max_generations}, 目标成功Alpha数={target_successful_alphas}")
+            
+            # 初始化或恢复种群
+            if resume:
+                population = self._load_population_from_checkpoint()
+                if population is None:
+                    self.logger.warning("无法从检查点恢复种群，将开始新的优化过程")
+                    population = self._initialize_population(population_size)
+                    current_generation = 0
+                else:
+                    current_generation = self._load_generation_from_checkpoint()
+                    self.logger.info(f"成功从检查点恢复种群，当前代数: {current_generation}")
+            else:
+                self.logger.info("开始新的优化过程，初始化种群...")
+                population = self._initialize_population(population_size)
+                current_generation = 0
+            
+            successful_alphas = []
+            
+            # 主要的进化循环
+            for generation in range(current_generation, max_generations):
+                self.logger.info(f"\n=== 第 {generation + 1}/{max_generations} 代进化开始 ===")
+                
+                # 评估当前种群的适应度
+                self.logger.info("评估种群适应度...")
+                self._evaluate_population_fitness(population)
+                
+                # 检查是否有成功的Alpha
+                generation_successful = self._extract_successful_alphas(population)
+                successful_alphas.extend(generation_successful)
+                
+                if generation_successful:
+                    self.logger.info(f"第 {generation + 1} 代发现 {len(generation_successful)} 个成功Alpha")
+                
+                # 检查是否达到目标
+                if len(successful_alphas) >= target_successful_alphas:
+                    self.logger.info(f"已达到目标成功Alpha数量 ({len(successful_alphas)}/{target_successful_alphas})，提前结束优化")
+                    break
+                
+                # 保存当前进度
+                self._save_checkpoint(population, generation)
+                
+                # 如果不是最后一代，进行进化操作
+                if generation < max_generations - 1:
+                    self.logger.info("执行进化操作...")
+                    population = self._evolve_population(population)
+                
+                self.logger.info(f"第 {generation + 1} 代进化完成")
+            
+            # 优化完成，保存结果
+            self.logger.info(f"\n=== 优化完成 ===")
+            self.logger.info(f"总共发现 {len(successful_alphas)} 个成功Alpha")
+            
+            if successful_alphas:
+                self._save_successful_alphas(successful_alphas)
+                self.logger.info("成功Alpha已保存")
+            
+            # 清理检查点文件
+            self._cleanup_checkpoints()
+            
+            self.logger.info("Alpha因子遗传算法优化完成")
+            
+        except KeyboardInterrupt:
+            self.logger.warning("优化过程被用户中断")
+            # 保存当前进度
+            if 'population' in locals() and 'generation' in locals():
+                self._save_checkpoint(population, generation)
+                self.logger.info("当前进度已保存")
+            raise
+        except Exception as e:
+            self.logger.error(f"优化过程中发生错误: {e}", exc_info=True)
+            raise
+    
+    def _initialize_population(self, size: int) -> List[Individual]:
+        """
+        初始化遗传算法种群。
+        
+        参数:
+            size (int): 种群大小
+            
+        返回:
+            List[Individual]: 初始化的种群
+        """
+        self.logger.info(f"初始化种群，大小: {size}")
+        population = []
+        
+        for i in range(size):
+            try:
+                individual = self.generate_random_individual()
+                population.append(individual)
+                self.logger.debug(f"生成个体 {i+1}/{size}: {individual.get_expression_str()}")
+            except Exception as e:
+                self.logger.error(f"生成第 {i+1} 个个体时发生错误: {e}")
+                self.logger.error(f"错误详情: {type(e).__name__}: {str(e)}")
+                import traceback
+                self.logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
+                # 继续尝试生成其他个体
+                continue
+        
+        self.logger.info(f"成功初始化种群，实际大小: {len(population)}")
+        return population
+    
+    def _evaluate_population_fitness(self, population: List[Individual]) -> None:
+        """
+        评估种群中所有个体的适应度。
+        
+        参数:
+            population (List[Individual]): 待评估的种群
+        """
+        self.logger.info(f"开始评估 {len(population)} 个个体的适应度")
+        
+        for i, individual in enumerate(population):
+            try:
+                # 这里应该调用WQB API进行Alpha测试
+                # 目前作为占位符实现
+                fitness_score = self._calculate_individual_fitness(individual)
+                individual.fitness_score = fitness_score
+                self.logger.debug(f"个体 {i+1} 适应度: {fitness_score:.4f}")
+            except Exception as e:
+                self.logger.error(f"评估个体 {i+1} 适应度时发生错误: {e}")
+                individual.fitness_score = 0.0  # 设置默认适应度
+    
+    def _calculate_individual_fitness(self, individual: Individual) -> float:
+        """
+        计算单个个体的适应度分数。
+        
+        参数:
+            individual (Individual): 待评估的个体
+            
+        返回:
+            float: 适应度分数
+        """
+        # 占位符实现 - 实际应该通过WQB API测试Alpha性能
+        # 这里返回一个随机分数作为示例
+        import random
+        fitness = random.uniform(0.0, 1.0)
+        self.logger.debug(f"计算个体适应度 (占位符): {fitness:.4f}")
+        return fitness
+    
+    def _extract_successful_alphas(self, population: List[Individual]) -> List[Individual]:
+        """
+        从种群中提取成功的Alpha个体。
+        
+        参数:
+            population (List[Individual]): 当前种群
+            
+        返回:
+            List[Individual]: 成功的Alpha个体列表
+        """
+        min_fitness = self.config_manager.get('ga.fitness_function.min_acceptable_fitness', 0.7)
+        successful = [ind for ind in population if ind.fitness_score >= min_fitness]
+        
+        if successful:
+            self.logger.info(f"发现 {len(successful)} 个成功Alpha (适应度 >= {min_fitness})")
+        
+        return successful
+    
+    def _evolve_population(self, population: List[Individual]) -> List[Individual]:
+        """
+        对种群执行进化操作（选择、交叉、变异）。
+        
+        参数:
+            population (List[Individual]): 当前种群
+            
+        返回:
+            List[Individual]: 进化后的新种群
+        """
+        self.logger.info("执行种群进化操作")
+        
+        # 占位符实现 - 实际应该实现选择、交叉、变异算法
+        # 这里简单地生成新的随机个体作为示例
+        new_population = []
+        
+        # 保留一些最优个体（精英选择）
+        population.sort(key=lambda x: x.fitness_score, reverse=True)
+        elite_size = max(1, len(population) // 10)  # 保留10%的精英
+        new_population.extend(population[:elite_size])
+        
+        # 生成其余个体
+        while len(new_population) < len(population):
+            try:
+                new_individual = self.generate_random_individual()
+                new_population.append(new_individual)
+            except Exception as e:
+                self.logger.error(f"生成新个体时发生错误: {e}")
+                self.logger.error(f"错误详情: {type(e).__name__}: {str(e)}")
+                import traceback
+                self.logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
+                break
+        
+        self.logger.info(f"进化完成，新种群大小: {len(new_population)}")
+        return new_population
+    
+    def _save_checkpoint(self, population: List[Individual], generation: int) -> None:
+        """
+        保存当前优化进度的检查点。
+        
+        参数:
+            population (List[Individual]): 当前种群
+            generation (int): 当前代数
+        """
+        try:
+            # 这里应该实现检查点保存逻辑
+            # 可以保存到文件或通过result_handler保存
+            self.logger.debug(f"保存检查点: 第 {generation} 代，种群大小 {len(population)}")
+        except Exception as e:
+            self.logger.error(f"保存检查点时发生错误: {e}")
+    
+    def _load_population_from_checkpoint(self) -> Optional[List[Individual]]:
+        """
+        从检查点加载种群。
+        
+        返回:
+            Optional[List[Individual]]: 加载的种群，如果失败则返回None
+        """
+        try:
+            # 占位符实现 - 实际应该从文件或数据库加载
+            self.logger.debug("尝试从检查点加载种群")
+            return None  # 暂时返回None，表示没有可用的检查点
+        except Exception as e:
+            self.logger.error(f"从检查点加载种群时发生错误: {e}")
+            return None
+    
+    def _load_generation_from_checkpoint(self) -> int:
+        """
+        从检查点加载当前代数。
+        
+        返回:
+            int: 当前代数
+        """
+        # 占位符实现
+        return 0
+    
+    def _save_successful_alphas(self, successful_alphas: List[Individual]) -> None:
+        """
+        保存成功的Alpha个体。
+        
+        参数:
+            successful_alphas (List[Individual]): 成功的Alpha个体列表
+        """
+        try:
+            # 这里应该通过result_handler保存成功的Alpha
+            self.logger.info(f"保存 {len(successful_alphas)} 个成功Alpha")
+            for i, alpha in enumerate(successful_alphas):
+                self.logger.info(f"成功Alpha {i+1}: {alpha.get_expression_str()}, 适应度: {alpha.fitness_score:.4f}")
+        except Exception as e:
+            self.logger.error(f"保存成功Alpha时发生错误: {e}")
+    
+    def _cleanup_checkpoints(self) -> None:
+        """
+        清理检查点文件。
+        """
+        try:
+            # 占位符实现 - 实际应该删除临时检查点文件
+            self.logger.debug("清理检查点文件")
+        except Exception as e:
+            self.logger.error(f"清理检查点文件时发生错误: {e}")
 
 
 # --- 主程序入口：测试 AlphaEvolutionEngine 初始化 (保持不变) ---

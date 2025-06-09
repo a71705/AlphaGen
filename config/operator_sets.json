@@ -1,4 +1,41 @@
 {
+  "terminal_values": ["0.5", "1", "2", "-1"],
+  "ts_ops": [
+    "ts_rank",
+    "ts_delay",
+    "ts_delta",
+    "ts_stddev",
+    "ts_mean",
+    "ts_max",
+    "ts_min",
+    "ts_product",
+    "ts_sum",
+    "ts_decay_linear"
+  ],
+  "binary_ops": [
+    "add",
+    "subtract",
+    "multiply",
+    "divide"
+  ],
+  "unary_ops": [
+    "abs",
+    "log",
+    "sqrt",
+    "inverse",
+    "negate"
+  ],
+  "ts_ops_values": [5, 10, 20, 60],
+  "group_ops": [
+    "group_neutralize",
+    "group_rank",
+    "group_scale"
+  ],
+  "decay_choices": [0, 1, 5, 10],
+  "delay_choices": [0, 1, 2],
+  "truncation_choices": [0.01, 0.05],
+  "universe_choices": ["TOP1000", "TOP3000"],
+  "neutralization_choices": [null, "market", "industry"],
   "arithmetic_ops": [
     "add",
     "subtract",

@@ -1,5 +1,12 @@
 {
   "population_size": 100,
+  "max_generations": 50,
+  "injection_rate": 0.1,
+  "min_population_size": 20,
+  "max_population_size": 200,
+  "target_successful_alphas": 50,
+  "alpha_generation_mode": "template_based",
+  "genes": ["decay", "universe", "neutralization"],
   "number_of_generations": 50,
   "crossover_probability": 0.7,
   "mutation_probability": 0.2,
@@ -27,5 +34,19 @@
   "evaluation_end_date": "2023-12-31",
   "evaluation_delay": 1,
   "evaluation_book_size": 1000000,
-  "evaluation_costs_bps": 0.5
+  "evaluation_costs_bps": 0.5,
+  "fitness_function": {
+    "min_acceptable_fitness": 0.5,
+    "weight_sharpe": 0.5,
+    "weight_wq_fitness": 0.3,
+    "weight_returns": 0.1,
+    "weight_drawdown": 0.05,
+    "weight_turnover": 0.05,
+    "turnover_penalty_factor": 0.9,
+    "max_turnover_threshold": 2.5,
+    "min_turnover_threshold": 0.1,
+    "invalid_penalty_factor": 0.1,
+    "epsilon": 1e-6,
+    "turnover_power": 1.0
+  }
 }
