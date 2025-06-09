@@ -1,6 +1,6 @@
 # WorldQuant Alpha 因子自动化挖掘系统
 
-**版本:** 1.0 (此版本基于截至Task T7.0的开发状态)
+**版本:** 1.0 (此版本基于截至Task T7.0的开发状态，并已包含对启动错误的修复)
 **最后更新:** 2024年06月16日
 
 ## 1. 项目概览
@@ -68,7 +68,7 @@
   ```bash
   python -m venv venv
   source venv/bin/activate  # Linux/macOS
-  # venv\Scriptsctivate   # Windows
+  # venv\Scripts\activate   # Windows (注意转义)
   ```
 
 ### 4.2. 克隆仓库
@@ -103,18 +103,19 @@ pyparsing
     *   **重要**: `config/general_config.json` 文件中的 `credentials_file` 字段定义了此凭证文件的路径 (默认为 `"config/credentials.json"`)。请务必保护好此凭证文件。
 
 2.  **通用配置 (`config/general_config.json`)**:
+    *   **重要**: 此文件的顶层直接是配置项键值对（例如 `"log_level": "INFO"`）。`ConfigManager` 会将此文件的全部内容加载到配置字典的 `"general"` 键下，因此代码中通过 `config_manager.get("general.log_level")` 访问。
     *   包含API基础URL、会话文件路径、日志级别、最大并发模拟数、API请求重试参数、可选数据获取开关（如PnL、年度统计）以及各类数据存储子目录的名称等。
 
 3.  **Alpha模板配置 (`config/alpha_templates.json`)**:
-    *   定义了用于基于模板生成Alpha的表达式模板及其占位符规则。
+    *   此文件的顶层直接是模板名称到模板定义（字符串或对象）的映射。`ConfigManager` 将其加载到配置字典的 `"alpha_templates"` 键下。
 
 4.  **操作符集配置 (`config/operator_sets.json`)**:
-    *   定义了可用于Alpha生成的各类操作符、数据字段常量以及操作符参数的可选值范围。
+    *   此文件的顶层直接是各类操作符列表（如 `"ts_ops"`, `"binary_ops"`）、数据字段常量列表、参数可选值范围等。`ConfigManager` 将其加载到配置字典的 `"operator_sets"` 键下。
 
 5.  **遗传算法配置 (`config/ga_config.json`)**:
-    *   定义了遗传算法的核心参数，如种群大小、最大进化代数、精英选择数量、交叉与变异率、适应度函数计算方式（指标权重、惩罚因子等）以及哪些模拟参数参与遗传进化。
+    *   此文件的顶层直接是GA的核心参数（如 `"population_size"`, `"fitness_function"` 对象等）。`ConfigManager` 将其加载到配置字典的 `"ga"` 键下。
 
-请根据您的具体需求和WQB平台特性，仔细检查并调整这些配置文件。通常，**除了 `credentials.json` 必须由用户创建和填写外**，其他配置文件可以使用项目提供的默认值开始运行。
+请根据您的具体需求和WQB平台特性，仔细检查并调整这些配置文件。通常，**除了 `credentials.json` 必须由用户创建和填写外**，其他配置文件可以使用项目提供的默认值开始运行。`general_config.json` 的结构已在近期修复中调整为顶层直接是配置项。
 
 ## 5. 运行系统
 
@@ -152,7 +153,7 @@ python main.py
 ## 8. 注意事项与未来工作
 
 -   **AST的交叉与变异**: `AlphaEvolutionEngine` 中对Alpha表达式AST的交叉和变异操作当前仅为初步框架/占位符。后续需要实现更成熟的遗传编程操作。
--   **配置项的运行时修改**: `SystemOrchestrator` 菜单中修改配置的选项多为占位符。未来可增强 `ConfigManager` 以支持更多配置的运行时修改和持久化。
+-   **配置项的运行时修改**: `SystemOrchestrator` 菜单中修改配置的选项多为占位符。未来可增强 `ConfigManager` 以支持更多配置的运行时修改和持久化（当前 `ConfigManager` 不支持通用配置项的写回）。
 -   **测试覆盖**: 当前各模块的 `if __name__ == '__main__':` 块提供了基本测试。为确保系统质量，未来应引入如 `pytest` 等专用测试框架，编写更全面的单元测试和集成测试。
 -   **错误处理与鲁棒性**: 尽管已努力加入错误处理，但实际运行中可能遇到更多API响应或边界情况，需持续完善。
 -   **性能优化**: 对于大规模长时间运行的GA，可能需进一步分析和优化性能瓶颈。

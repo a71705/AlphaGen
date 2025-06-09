@@ -8,27 +8,39 @@
       "email": "your_email@example.com"
     }
   ],
-  "logging": {
-    "level": "INFO",
-    "format": "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
-    "rotation": "10 MB",
-    "retention": "30 days",
-    "log_file_main": "logs/main.log",
-    "log_file_ga": "logs/ga_engine.log",
-    "log_file_results": "logs/results_handler.log"
-  },
+  "log_level": "INFO",
+  "logging_format_file": "%(asctime)s - %(levelname)s - [%(name)s:%(module)s:%(funcName)s:%(lineno)d] - %(message)s",
+  "logging_format_console": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
+  "logging_datefmt": "%Y-%m-%d %H:%M:%S",
+  "api_base_url": "https://api.worldquantbrain.com/",
+  "api_timeout_seconds": 60,
+  "api_max_retries": 3,
+  "credentials_file": "config/credentials.json",
+  "session_pkl_file": "data/session.pkl",
+  "max_concurrent_simulations": 5,
   "data_paths": {
-    "ga_checkpoints": "data/ga_checkpoints/",
-    "successful_alphas": "data/successful_alphas/",
-    "alpha_pnl": "data/alpha_pnl/",
-    "alpha_yearly_stats": "data/alpha_yearly_stats/",
-    "available_datafields": "data/available_datafields.json",
-    "inaccessible_ops_blacklist": "data/inaccessible_ops_blacklist.json"
+    "base_data_directory": "data",
+    "successful_alphas_subdir": "successful_alphas",
+    "alpha_pnl_subdir": "alpha_pnl",
+    "alpha_yearly_stats_subdir": "alpha_yearly_stats",
+    "ga_checkpoints_subdir": "ga_checkpoints"
   },
-  "api_client": {
-    "base_url": "https://your_wqb_api_endpoint.com/api",
-    "timeout_seconds": 60,
-    "max_retries": 3
-  },
-  "random_seed": 42
+  "random_seed": 42,
+  "session_max_age_hours": 4,
+  "api_retry_after_default_seconds": 5,
+  "api_retry_backoff_factor": 1,
+  "api_retry_max_backoff_seconds": 30,
+  "default_instrument_type": "EQUITY",
+  "default_region": "USA",
+  "default_language": "FASTEXPR",
+  "default_pasteurization": "YOUNG",
+  "default_test_period": "2010-01-01_2023-12-31",
+  "default_unit_handling": "VERIFY",
+  "default_nan_handling": "NEUTRAL",
+  "enable_batch_simulation": false,
+  "batch_size": 10,
+  "simulation_poll_timeout_seconds": 300,
+  "api_poll_interval_seconds": 5,
+  "get_pnl": true,
+  "get_yearly_stats": true
 }
