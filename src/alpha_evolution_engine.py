@@ -638,7 +638,7 @@ class AlphaEvolutionEngine:
             # 主循环：处理完成的任务并补充新任务
             while running_futures:
                 # 等待至少一个任务完成
-                for future in as_completed(running_futures, timeout=1800):
+                for future in as_completed(running_futures):
                     individual = running_futures.pop(future)
                     completed_count += 1
                     
